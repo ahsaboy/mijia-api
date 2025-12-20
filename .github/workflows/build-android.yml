@@ -1,0 +1,100 @@
+name: Build Linux ARM64 Native Executable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build-android-arm64:
+    runs-on: ubuntu-24.04-arm  # Native ARM64 runner
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf ccache
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install nuitka ordered-set zstandard
+          pip install pillow pycryptodome qrcode requests tzlocal
+
+      - name: Create entry point
+        run: |
+          cat > main.py << 'EOF'
+          #!/usr/bin/env python3
+          from mijiaAPI.__main__ import cli
+          if __name__ == "__main__":
+              cli()
+          EOF
+
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka \
+            --onefile \
+            --include-package=mijiaAPI \
+            --include-package=PIL \
+            --include-package=Crypto \
+            --include-package=qrcode \
+            --include-package=requests \
+            --include-package=tzlocal \
+            --include-package=urllib3 \
+            --include-package=charset_normalizer \
+            --include-package=certifi \
+            --include-package=idna \
+            --remove-output \
+            --assume-yes-for-downloads \
+            --output-filename=mijiaAPI-linux-arm64 \
+            --output-dir=dist \
+            main.py
+
+      - name: Test binary
+        run: |
+          chmod +x dist/mijiaAPI-linux-arm64
+          dist/mijiaAPI-linux-arm64 --version || true
+
+      - name: Verify binary
+        run: |
+          file dist/mijiaAPI-linux-arm64
+          ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mijiaAPI-linux-arm64
+          path: dist/mijiaAPI-linux-arm64
+          if-no-files-found: error
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/mijiaAPI-linux-arm64
+          body: |
+            ## Linux ARM64 Native Executable
+
+            下载 `mijiaAPI-linux-arm64` 后:
+            ```bash
+            chmod +x mijiaAPI-linux-arm64
+            ./mijiaAPI-linux-arm64 --help
+            ```
+
+            适用于 Linux ARM64 系统（如树莓派、ARM 服务器等）。
+            Termux 用户可能需要使用 proot 运行。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
