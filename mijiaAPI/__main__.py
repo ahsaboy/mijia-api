@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -12,6 +13,17 @@ from .version import version
 
 
 logging.getLogger("mijiaAPI").setLevel(logging.INFO)
+
+
+def get_default_auth_path() -> Path:
+    """获取默认认证文件路径，兼容 Android 等无 HOME 环境"""
+    try:
+        home = Path.home()
+    except RuntimeError:
+        # Android adb shell 等环境可能没有 HOME 变量
+        home = Path(os.environ.get("HOME", "/data/local/tmp"))
+    return home / ".config" / "mijia-api" / "auth.json"
+
 
 def parse_args(args):
     parser = argparse.ArgumentParser(description=f"Mijia API CLI (v{version})")
@@ -25,7 +37,7 @@ def parse_args(args):
     parser.add_argument(
         '-p', '--auth_path',
         type=Path,
-        default=Path.home() / ".config" / "mijia-api" / "auth.json",
+        default=get_default_auth_path(),
         help="认证文件保存路径，默认保存在 ~/.config/mijia-api/auth.json",
     )
     parser.add_argument(
@@ -87,7 +99,7 @@ def parse_args(args):
     get.add_argument(
         '-p', '--auth_path',
         type=Path,
-        default=Path.home() / ".config" / "mijia-api" / "auth.json",
+        default=get_default_auth_path(),
         help="认证文件保存路径，默认保存在 ~/.config/mijia-api/auth.json",
     )
     get.add_argument(
@@ -115,7 +127,7 @@ def parse_args(args):
     set.add_argument(
         '-p', '--auth_path',
         type=Path,
-        default=Path.home() / ".config" / "mijia-api" / "auth.json",
+        default=get_default_auth_path(),
         help="认证文件保存路径，默认保存在 ~/.config/mijia-api/auth.json",
     )
     set.add_argument(
