@@ -1,4 +1,4 @@
-name: Build Linux ARM64 Native Executable
+name: Build ARM64 Static Executable
 
 on:
   push:
@@ -6,77 +6,76 @@ on:
       - 'v*'
   workflow_dispatch:
 
-env:
-  PYTHON_VERSION: "3.12"
-
 jobs:
-  build-android-arm64:
+  build-arm64-static:
     runs-on: ubuntu-24.04-arm  # Native ARM64 runner
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install system dependencies
+      - name: Build static binary in Alpine
         run: |
-          sudo apt-get update
-          sudo apt-get install -y patchelf ccache
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            alpine:latest \
+            sh -c '
+              set -e
+              echo "=== Installing dependencies ==="
+              apk add --no-cache python3 py3-pip python3-dev gcc musl-dev \
+                patchelf ccache make zlib-dev jpeg-dev libffi-dev openssl-dev
 
-      - name: Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install nuitka ordered-set zstandard
-          pip install pillow pycryptodome qrcode requests tzlocal
+              echo "=== Installing Python packages ==="
+              pip3 install --break-system-packages \
+                nuitka ordered-set zstandard \
+                pillow pycryptodome qrcode requests tzlocal
 
-      - name: Create entry point
-        run: |
-          cat > main.py << 'EOF'
-          #!/usr/bin/env python3
-          from mijiaAPI.__main__ import cli
-          if __name__ == "__main__":
-              cli()
-          EOF
+              echo "=== Creating entry point ==="
+              cat > main.py << EOF
+#!/usr/bin/env python3
+from mijiaAPI.__main__ import cli
+if __name__ == "__main__":
+    cli()
+EOF
 
-      - name: Build with Nuitka
-        run: |
-          python -m nuitka \
-            --onefile \
-            --include-package=mijiaAPI \
-            --include-package=PIL \
-            --include-package=Crypto \
-            --include-package=qrcode \
-            --include-package=requests \
-            --include-package=tzlocal \
-            --include-package=urllib3 \
-            --include-package=charset_normalizer \
-            --include-package=certifi \
-            --include-package=idna \
-            --remove-output \
-            --assume-yes-for-downloads \
-            --output-filename=mijiaAPI-linux-arm64 \
-            --output-dir=dist \
-            main.py
+              echo "=== Building with Nuitka (static) ==="
+              python3 -m nuitka \
+                --onefile \
+                --static-libpython=yes \
+                --include-package=mijiaAPI \
+                --include-package=PIL \
+                --include-package=Crypto \
+                --include-package=qrcode \
+                --include-package=requests \
+                --include-package=tzlocal \
+                --include-package=urllib3 \
+                --include-package=charset_normalizer \
+                --include-package=certifi \
+                --include-package=idna \
+                --remove-output \
+                --assume-yes-for-downloads \
+                --output-filename=mijiaAPI-arm64-static \
+                --output-dir=dist \
+                main.py
+
+              echo "=== Checking output ==="
+              ls -lh dist/
+              file dist/mijiaAPI-arm64-static
+              ldd dist/mijiaAPI-arm64-static || echo "Static binary (no dynamic libs)"
+            '
 
       - name: Test binary
         run: |
-          chmod +x dist/mijiaAPI-linux-arm64
-          dist/mijiaAPI-linux-arm64 --version || true
-
-      - name: Verify binary
-        run: |
-          file dist/mijiaAPI-linux-arm64
-          ls -lh dist/
+          chmod +x dist/mijiaAPI-arm64-static
+          file dist/mijiaAPI-arm64-static
+          dist/mijiaAPI-arm64-static --version || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mijiaAPI-linux-arm64
-          path: dist/mijiaAPI-linux-arm64
+          name: mijiaAPI-arm64-static
+          path: dist/mijiaAPI-arm64-static
           if-no-files-found: error
 
       - name: Create Release
@@ -84,17 +83,18 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            dist/mijiaAPI-linux-arm64
+            dist/mijiaAPI-arm64-static
           body: |
-            ## Linux ARM64 Native Executable
+            ## ARM64 Static Executable
 
-            下载 `mijiaAPI-linux-arm64` 后:
+            下载 `mijiaAPI-arm64-static` 后:
             ```bash
-            chmod +x mijiaAPI-linux-arm64
-            ./mijiaAPI-linux-arm64 --help
+            chmod +x mijiaAPI-arm64-static
+            ./mijiaAPI-arm64-static --help
             ```
 
-            适用于 Linux ARM64 系统（如树莓派、ARM 服务器等）。
-            Termux 用户可能需要使用 proot 运行。
+            静态链接版本，适用于:
+            - Linux ARM64 (树莓派、ARM 服务器等)
+            - Android ARM64 (通过 adb shell 或 Termux)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
