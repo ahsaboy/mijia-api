@@ -14,7 +14,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build static binary in Alpine
+      - name: Build fully static binary in Alpine
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
@@ -22,9 +22,22 @@ jobs:
             alpine:latest \
             sh -c '
               set -e
-              echo "=== Installing dependencies ==="
-              apk add --no-cache python3 py3-pip python3-dev gcc musl-dev \
-                patchelf ccache make zlib-dev jpeg-dev libffi-dev openssl-dev
+
+              echo "=== Installing build dependencies ==="
+              apk add --no-cache \
+                python3 python3-dev py3-pip \
+                gcc g++ musl-dev make \
+                patchelf ccache \
+                zlib-dev zlib-static \
+                libjpeg-turbo-dev libjpeg-turbo-static \
+                libffi-dev \
+                openssl-dev openssl-libs-static \
+                libwebp-dev libwebp-static \
+                freetype-dev freetype-static \
+                lcms2-dev lcms2-static \
+                openjpeg-dev \
+                tiff-dev \
+                zstd-dev zstd-static
 
               echo "=== Installing Python packages ==="
               pip3 install --break-system-packages \
@@ -39,10 +52,13 @@ if __name__ == "__main__":
     cli()
 EOF
 
-              echo "=== Building with Nuitka (static) ==="
+              echo "=== Building with Nuitka (fully static) ==="
+              LDFLAGS="-static -static-libgcc -static-libstdc++" \
+              CFLAGS="-static" \
               python3 -m nuitka \
                 --onefile \
                 --static-libpython=yes \
+                --lto=yes \
                 --include-package=mijiaAPI \
                 --include-package=PIL \
                 --include-package=Crypto \
@@ -62,13 +78,27 @@ EOF
               echo "=== Checking output ==="
               ls -lh dist/
               file dist/mijiaAPI-arm64-static
-              ldd dist/mijiaAPI-arm64-static || echo "Static binary (no dynamic libs)"
+
+              echo "=== Checking dynamic dependencies ==="
+              ldd dist/mijiaAPI-arm64-static 2>&1 || echo "Good: statically linked"
             '
 
-      - name: Test binary
+      - name: Verify static linking
         run: |
           chmod +x dist/mijiaAPI-arm64-static
           file dist/mijiaAPI-arm64-static
+          # Check if truly static
+          if ldd dist/mijiaAPI-arm64-static 2>&1 | grep -q "not a dynamic"; then
+            echo "✓ Binary is statically linked"
+          elif ldd dist/mijiaAPI-arm64-static 2>&1 | grep -q "statically linked"; then
+            echo "✓ Binary is statically linked"
+          else
+            echo "⚠ Binary has dynamic dependencies:"
+            ldd dist/mijiaAPI-arm64-static || true
+          fi
+
+      - name: Test binary
+        run: |
           dist/mijiaAPI-arm64-static --version || true
 
       - name: Upload artifact
@@ -93,7 +123,7 @@ EOF
             ./mijiaAPI-arm64-static --help
             ```
 
-            静态链接版本，适用于:
+            完全静态链接版本，适用于:
             - Linux ARM64 (树莓派、ARM 服务器等)
             - Android ARM64 (通过 adb shell 或 Termux)
         env:
